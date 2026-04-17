@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -13,8 +14,10 @@ import '../bloc/hotel_search_state.dart';
 import 'Wishlist_bloc.dart';
 import 'hotel_listing_page.dart';
 import 'hotel_room_page.dart';
-import 'hotel_search_result_page.dart';
+import 'hotel_search_result_page.dart' show HotelSearchResultsSliverGroup;
 import 'popular_hotels_cubit.dart';
+import '../widgets/guest_rooms_sheet.dart';
+import '../widgets/image_preview_actions.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -25,16 +28,19 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   final TextEditingController _destCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
+  final GlobalKey _searchResultsKey = GlobalKey();
 
   DateTime _checkIn = DateTime.now().add(const Duration(days: 1));
   DateTime _checkOut = DateTime.now().add(const Duration(days: 3));
   int _adults = 2;
   int _children = 0;
+  int _rooms = 1;
   List<int> _childrenAges = [];
   bool _isScrolled = false;
 
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
+  late AnimationController _shimmerCtrl;
 
   final _destinations = const [
     {'name': 'Goa', 'emoji': '🏖️', 'tag': 'Beach'},
@@ -54,6 +60,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
     _fadeCtrl.forward();
+    _shimmerCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
     _scrollCtrl.addListener(() {
       final s = _scrollCtrl.offset > 10;
       if (s != _isScrolled) setState(() => _isScrolled = s);
@@ -65,7 +75,31 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _destCtrl.dispose();
     _scrollCtrl.dispose();
     _fadeCtrl.dispose();
+    _shimmerCtrl.dispose();
     super.dispose();
+  }
+
+  String get _greetingLine {
+    final h = DateTime.now().hour;
+    final part = h < 12
+        ? 'Good morning'
+        : h < 17
+        ? 'Good afternoon'
+        : 'Good evening';
+    final user = FirebaseAuth.instance.currentUser;
+    String? first;
+    final dn = user?.displayName?.trim();
+    if (dn != null && dn.isNotEmpty) {
+      first = dn.split(RegExp(r'\s+')).first;
+    } else {
+      final em = user?.email;
+      if (em != null && em.contains('@')) {
+        first = em.split('@').first;
+        if (first.isEmpty) first = null;
+      }
+    }
+    if (first != null) return '$part, $first';
+    return '$part — where to next?';
   }
 
   String get _fmtIn => DateFormat('dd MMM').format(_checkIn);
@@ -74,10 +108,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String get _dayOut => DateFormat('EEE').format(_checkOut);
   int get _nights => _checkOut.difference(_checkIn).inDays;
   String get _guestLabel =>
-      '$_adults Adult${_adults > 1 ? 's' : ''}'
-      '${_children > 0 ? ', $_children Child${_children > 1 ? 'ren' : ''}' : ''}';
+      '$_adults adult${_adults > 1 ? 's' : ''}'
+      '${_children > 0 ? ', $_children child${_children > 1 ? 'ren' : ''}' : ''}'
+      ' · $_rooms room${_rooms > 1 ? 's' : ''}';
 
   void _search(BuildContext ctx, HotelSearchBloc bloc) {
+    FocusManager.instance.primaryFocus?.unfocus();
     final city = _destCtrl.text.trim();
     if (city.isEmpty) {
       _snack(ctx, 'Please enter a destination 📍');
@@ -88,26 +124,35 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _go(BuildContext ctx, HotelSearchBloc bloc, String city) {
+    FocusManager.instance.primaryFocus?.unfocus();
     bloc.add(
       SearchHotelsEvent(
         SearchParams(
-          cityName: city,
+          location: city,
           checkIn: DateFormat('yyyy-MM-dd').format(_checkIn),
           checkOut: DateFormat('yyyy-MM-dd').format(_checkOut),
           adults: _adults,
           children: _children,
+          rooms: _rooms,
+          childAges: _children > 0 ? List<int>.from(_childrenAges) : null,
         ),
       ),
     );
-    Navigator.push(
-      ctx,
-      MaterialPageRoute(
-        builder: (_) => BlocProvider.value(
-          value: bloc,
-          child: const HotelSearchResultPage(),
-        ),
-      ),
-    );
+  }
+
+  void _scrollToSearchResults() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final anchor = _searchResultsKey.currentContext;
+      if (anchor != null) {
+        Scrollable.ensureVisible(
+          anchor,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeOutCubic,
+          alignment: 0.02,
+        );
+      }
+    });
   }
 
   void _snack(BuildContext ctx, String msg) {
@@ -158,14 +203,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       context: ctx,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => _GuestSheet(
+           builder: (_) => GuestRoomsSheet(
         adults: _adults,
         children: _children,
         childrenAges: List.from(_childrenAges),
-        onDone: (a, c, ages) => setState(() {
+        rooms: _rooms,
+        onDone: (a, c, ages, r) => setState(() {
           _adults = a;
           _children = c;
           _childrenAges = ages;
+          _rooms = r;
         }),
       ),
     );
@@ -187,17 +234,62 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             appBar: _appBar(ctx),
             body: FadeTransition(
               opacity: _fadeAnim,
-              child: CustomScrollView(
-                controller: _scrollCtrl,
-                physics: const BouncingScrollPhysics(),
-                slivers: [
-                  SliverToBoxAdapter(child: _hero(ctx, bloc)),
-                  SliverToBoxAdapter(child: _promo()),
-                  SliverToBoxAdapter(child: _destinationsSection(ctx, bloc)),
-                  SliverToBoxAdapter(child: _popularSection(ctx)),
-                  SliverToBoxAdapter(child: _offers()),
-                  SliverToBoxAdapter(child: SizedBox(height: 40.h)),
-                ],
+              child: BlocListener<HotelSearchBloc, HotelSearchState>(
+                listenWhen: (prev, curr) =>
+                    curr is HotelSearchLoading ||
+                    curr is HotelSearchLoaded ||
+                    curr is HotelSearchEmpty ||
+                    curr is HotelSearchError,
+                listener: (context, state) {
+                  _scrollToSearchResults();
+                  if (state is HotelSearchLoaded &&
+                      state.searchParams != null) {
+                    final p = state.searchParams!;
+                    setState(() {
+                      _destCtrl.text = p.location;
+                      final inD = DateTime.tryParse(p.checkIn);
+                      final outD = DateTime.tryParse(p.checkOut);
+                      if (inD != null) {
+                        _checkIn = inD;
+                      }
+                      if (outD != null) {
+                        _checkOut = outD;
+                      }
+                      _adults = p.adults;
+                      _children = p.children;
+                      _rooms = p.rooms;
+                      _childrenAges = List<int>.from(p.childAges ?? []);
+                      while (_childrenAges.length < _children) {
+                        _childrenAges.add(5);
+                      }
+                    });
+                  }
+                },
+                child: RefreshIndicator(
+                  color: const Color(0xFF1A4B8E),
+                  displacement: 48,
+                  onRefresh: () async {
+                    HapticFeedback.lightImpact();
+                    await ctx.read<PopularHotelsCubit>().fetch();
+                  },
+                  child: CustomScrollView(
+                    controller: _scrollCtrl,
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
+                    ),
+                    slivers: [
+                    SliverToBoxAdapter(child: _hero(ctx, bloc)),
+                    SliverToBoxAdapter(child: _promo(ctx)),
+                    HotelSearchResultsSliverGroup(anchorKey: _searchResultsKey),
+                    SliverToBoxAdapter(child: _destinationsSection(ctx, bloc)),
+                    SliverToBoxAdapter(child: _popularSection(ctx)),
+                    SliverToBoxAdapter(child: _offers(ctx)),
+                    SliverToBoxAdapter(child: SizedBox(height: 40.h)),
+                  ],
+                ),
+                ),
               ),
             ),
           );
@@ -257,38 +349,66 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
     ),
     actions: [
-      Container(
-        width: 36.w,
-        height: 36.h,
-        margin: EdgeInsets.only(right: 14.w, top: 6.h, bottom: 6.h),
-        decoration: BoxDecoration(
-          color: _isScrolled
-              ? const Color(0xFFF1F5F9)
-              : Colors.white.withOpacity(0.15),
-          borderRadius: BorderRadius.circular(11.r),
-        ),
-        child: Stack(
-          children: [
-            Center(
-              child: Icon(
-                Icons.notifications_outlined,
-                color: _isScrolled ? const Color(0xFF1A1D2E) : Colors.white,
-                size: 18.sp,
-              ),
-            ),
-            Positioned(
-              top: 7.h,
-              right: 7.w,
-              child: Container(
-                width: 7.w,
-                height: 7.h,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF59E0B),
-                  shape: BoxShape.circle,
+      Padding(
+        padding: EdgeInsets.only(right: 8.w),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                SnackBar(
+                  content: const Text(
+                    'You are all caught up — no new alerts.',
+                  ),
+                  backgroundColor: const Color(0xFF1A1D2E),
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12.r),
+                  ),
+                  margin: EdgeInsets.all(16.w),
+                  duration: const Duration(seconds: 2),
                 ),
+              );
+            },
+            borderRadius: BorderRadius.circular(11.r),
+            child: Container(
+              width: 36.w,
+              height: 36.h,
+              margin: EdgeInsets.only(right: 6.w, top: 6.h, bottom: 6.h),
+              decoration: BoxDecoration(
+                color: _isScrolled
+                    ? const Color(0xFFF1F5F9)
+                    : Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(11.r),
+              ),
+              child: Stack(
+                children: [
+                  Center(
+                    child: Icon(
+                      Icons.notifications_outlined,
+                      color: _isScrolled
+                          ? const Color(0xFF1A1D2E)
+                          : Colors.white,
+                      size: 18.sp,
+                    ),
+                  ),
+                  Positioned(
+                    top: 7.h,
+                    right: 7.w,
+                    child: Container(
+                      width: 7.w,
+                      height: 7.h,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFF59E0B),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     ],
@@ -357,6 +477,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(
+          _greetingLine,
+          style: TextStyle(
+            fontSize: 14.sp,
+            fontWeight: FontWeight.w600,
+            color: Colors.white.withOpacity(0.88),
+            letterSpacing: 0.2,
+          ),
+        ),
+        SizedBox(height: 12.h),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
@@ -527,6 +657,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   child: TextField(
                     controller: _destCtrl,
                     onChanged: (_) => setState(() {}),
+                    textInputAction: TextInputAction.search,
+                    textCapitalization: TextCapitalization.words,
+                    onSubmitted: (_) => _search(ctx, bloc),
                     style: TextStyle(
                       fontSize: 14.sp,
                       fontWeight: FontWeight.w500,
@@ -576,7 +709,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     _dateTile(
                       date: _fmtIn,
                       day: _dayIn,
-                      icon: Icons.login_rounded,
+                      icon: Icons.event_rounded,
                       onTap: () => _pickDate(isIn: true),
                     ),
                   ],
@@ -592,7 +725,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     _dateTile(
                       date: _fmtOut,
                       day: _dayOut,
-                      icon: Icons.logout_rounded,
+                      icon: Icons.event_available_rounded,
                       onTap: () => _pickDate(isIn: false),
                     ),
                   ],
@@ -785,7 +918,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     ),
   );
 
-  Widget _promo() => Container(
+  Widget _promo(BuildContext ctx) => Container(
     margin: EdgeInsets.fromLTRB(18.w, 20.h, 18.w, 0),
     height: 78.h,
     decoration: BoxDecoration(
@@ -830,19 +963,42 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ],
           ),
         ),
-        Container(
-          margin: EdgeInsets.only(right: 14.w),
-          padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
-          decoration: BoxDecoration(
-            color: Colors.white,
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () async {
+              await Clipboard.setData(const ClipboardData(text: 'STAY20'));
+              HapticFeedback.mediumImpact();
+              if (!ctx.mounted) return;
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                SnackBar(
+                  content: const Text('Code STAY20 copied to clipboard'),
+                  backgroundColor: const Color(0xFF0F766E),
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12.r),
+                  ),
+                  margin: EdgeInsets.all(16.w),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            },
             borderRadius: BorderRadius.circular(20.r),
-          ),
-          child: Text(
-            'Claim',
-            style: TextStyle(
-              fontSize: 11.sp,
-              fontWeight: FontWeight.w700,
-              color: const Color(0xFF0F766E),
+            child: Container(
+              margin: EdgeInsets.only(right: 14.w),
+              padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20.r),
+              ),
+              child: Text(
+                'Copy',
+                style: TextStyle(
+                  fontSize: 11.sp,
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFF0F766E),
+                ),
+              ),
             ),
           ),
         ),
@@ -870,50 +1026,57 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               separatorBuilder: (_, __) => SizedBox(width: 12.w),
               itemBuilder: (_, i) {
                 final d = _destinations[i];
-                return GestureDetector(
-                  onTap: () {
-                    _destCtrl.text = d['name']!;
-                    setState(() {});
-                    HapticFeedback.lightImpact();
-                    _go(ctx, bloc, d['name']!);
-                  },
-                  child: Container(
-                    width: 78.w,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(18.r),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF1A4B8E).withOpacity(0.07),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      _destCtrl.text = d['name']!;
+                      setState(() {});
+                      HapticFeedback.lightImpact();
+                      _go(ctx, bloc, d['name']!);
+                    },
+                    borderRadius: BorderRadius.circular(18.r),
+                    child: Ink(
+                      width: 78.w,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18.r),
+                        border: Border.all(
+                          color: const Color(0xFF1A4B8E).withOpacity(0.06),
                         ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(d['emoji']!, style: TextStyle(fontSize: 26.sp)),
-                        SizedBox(height: 5.h),
-                        Text(
-                          d['name']!,
-                          style: TextStyle(
-                            fontSize: 11.sp,
-                            fontWeight: FontWeight.w700,
-                            color: const Color(0xFF1A1D2E),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF1A4B8E).withOpacity(0.07),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        SizedBox(height: 2.h),
-                        Text(
-                          d['tag']!,
-                          style: TextStyle(
-                            fontSize: 9.sp,
-                            color: const Color(0xFF94A3B8),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(d['emoji']!, style: TextStyle(fontSize: 26.sp)),
+                          SizedBox(height: 5.h),
+                          Text(
+                            d['name']!,
+                            style: TextStyle(
+                              fontSize: 11.sp,
+                              fontWeight: FontWeight.w700,
+                              color: const Color(0xFF1A1D2E),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      ],
+                          SizedBox(height: 2.h),
+                          Text(
+                            d['tag']!,
+                            style: TextStyle(
+                              fontSize: 9.sp,
+                              color: const Color(0xFF94A3B8),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -1002,11 +1165,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       mainAxisSpacing: 12.h,
       mainAxisExtent: 230.h,
     ),
-    itemBuilder: (_, __) => Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFFE2E8F0),
-        borderRadius: BorderRadius.circular(16.r),
-      ),
+    itemBuilder: (_, __) => AnimatedBuilder(
+      animation: _shimmerCtrl,
+      builder: (_, __) {
+        final t = _shimmerCtrl.value;
+        return Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16.r),
+            gradient: LinearGradient(
+              begin: Alignment(-1.0 + t * 2, 0),
+              end: Alignment(0.2 + t * 2, 0.3),
+              colors: const [
+                Color(0xFFE2E8F0),
+                Color(0xFFF1F5F9),
+                Color(0xFFE2E8F0),
+              ],
+              stops: const [0.0, 0.5, 1.0],
+            ),
+          ),
+        );
+      },
     ),
   );
 
@@ -1075,25 +1253,30 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     ),
   );
 
-  Widget _offers() {
+  Widget _offers(BuildContext ctx) {
     final list = [
       {
         'icon': '🏷️',
         'title': 'Early Bird',
         'sub': 'Book 30 days early,\nsave 25%',
         'color': const Color(0xFF7C3AED),
+        'hint':
+            'Early-bird rates apply at checkout when you book 30+ days ahead.',
       },
       {
         'icon': '💳',
         'title': 'Pay Later',
         'sub': 'Reserve now,\npay at hotel',
         'color': const Color(0xFF0369A1),
+        'hint':
+            'Pay-at-property options depend on the hotel — available on select stays.',
       },
       {
         'icon': '🌟',
         'title': 'Earn Points',
         'sub': 'Loyalty rewards\non every stay',
         'color': const Color(0xFFB45309),
+        'hint': 'Rewards program coming soon — stay tuned!',
       },
     ];
     return Padding(
@@ -1108,42 +1291,64 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               final o = list[i];
               final c = o['color'] as Color;
               return Expanded(
-                child: Container(
-                  margin: EdgeInsets.only(
+                child: Padding(
+                  padding: EdgeInsets.only(
                     right: i < list.length - 1 ? 10.w : 0,
                   ),
-                  padding: EdgeInsets.all(12.w),
-                  decoration: BoxDecoration(
+                  child: Material(
                     color: c.withOpacity(0.07),
                     borderRadius: BorderRadius.circular(16.r),
-                    border: Border.all(color: c.withOpacity(0.18)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        o['icon'] as String,
-                        style: TextStyle(fontSize: 22.sp),
-                      ),
-                      SizedBox(height: 7.h),
-                      Text(
-                        o['title'] as String,
-                        style: TextStyle(
-                          fontSize: 11.sp,
-                          fontWeight: FontWeight.w700,
-                          color: c,
+                    child: InkWell(
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(
+                            content: Text(o['hint'] as String),
+                            behavior: SnackBarBehavior.floating,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12.r),
+                            ),
+                            margin: EdgeInsets.all(16.w),
+                            duration: const Duration(seconds: 3),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(16.r),
+                      child: Container(
+                        padding: EdgeInsets.all(12.w),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16.r),
+                          border: Border.all(color: c.withOpacity(0.18)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              o['icon'] as String,
+                              style: TextStyle(fontSize: 22.sp),
+                            ),
+                            SizedBox(height: 7.h),
+                            Text(
+                              o['title'] as String,
+                              style: TextStyle(
+                                fontSize: 11.sp,
+                                fontWeight: FontWeight.w700,
+                                color: c,
+                              ),
+                            ),
+                            SizedBox(height: 4.h),
+                            Text(
+                              o['sub'] as String,
+                              style: TextStyle(
+                                fontSize: 10.sp,
+                                color: const Color(0xFF94A3B8),
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      SizedBox(height: 4.h),
-                      Text(
-                        o['sub'] as String,
-                        style: TextStyle(
-                          fontSize: 10.sp,
-                          color: const Color(0xFF94A3B8),
-                          height: 1.4,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               );
@@ -1166,17 +1371,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         ),
       ),
       const Spacer(),
-      GestureDetector(
-        onTap: onSeeAll,
-        child: Text(
-          'See all',
-          style: TextStyle(
-            fontSize: 12.sp,
-            color: const Color(0xFF1A4B8E),
-            fontWeight: FontWeight.w600,
+      if (onSeeAll != null)
+        GestureDetector(
+          onTap: onSeeAll,
+          child: Text(
+            'See all',
+            style: TextStyle(
+              fontSize: 12.sp,
+              color: const Color(0xFF1A4B8E),
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
-      ),
     ],
   );
 }
@@ -1188,43 +1394,51 @@ class _PopularCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasImg =
-        hotel.frontImageUrl.isNotEmpty &&
-        hotel.frontImageUrl.startsWith('http');
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(18.r),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF1A4B8E).withOpacity(0.08),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(18.r),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
+    final heroUrl = hotel.resolvedHotelGalleryUrls.isNotEmpty
+        ? hotel.resolvedHotelGalleryUrls.first
+        : hotel.frontImageUrl;
+    final hasImg = heroUrl.isNotEmpty &&
+        (heroUrl.startsWith('http://') || heroUrl.startsWith('https://'));
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18.r),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF1A4B8E).withOpacity(0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18.r),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GestureDetector(
+              onTap: () => openHotelImagePreview(context, hotel),
+              child: SizedBox(
                 height: 140.h,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
                     hasImg
                         ? Image.network(
-                            hotel.frontImageUrl,
+                            heroUrl,
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => _ph(),
                             loadingBuilder: (_, child, prog) =>
                                 prog == null ? child : _ph(),
                           )
-                        : _ph(),
+                        : (heroUrl.isNotEmpty
+                            ? Image.asset(
+                                heroUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => _ph(),
+                              )
+                            : _ph()),
                     Positioned.fill(
                       child: DecoratedBox(
                         decoration: BoxDecoration(
@@ -1310,7 +1524,11 @@ class _PopularCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Padding(
+            ),
+            GestureDetector(
+              onTap: onTap,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
                 padding: EdgeInsets.fromLTRB(9.w, 7.h, 9.w, 8.h),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1376,8 +1594,8 @@ class _PopularCard extends StatelessWidget {
                   ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -1395,504 +1613,3 @@ class _PopularCard extends StatelessWidget {
   );
 }
 
-class _GuestSheet extends StatefulWidget {
-  final int adults, children;
-  final List<int> childrenAges;
-  final void Function(int adults, int children, List<int> ages) onDone;
-  const _GuestSheet({
-    required this.adults,
-    required this.children,
-    required this.childrenAges,
-    required this.onDone,
-  });
-  @override
-  State<_GuestSheet> createState() => _GuestSheetState();
-}
-
-class _GuestSheetState extends State<_GuestSheet> {
-  late int _a, _c;
-  late List<int> _ages;
-
-  @override
-  void initState() {
-    super.initState();
-    _a = widget.adults;
-    _c = widget.children;
-    _ages = List.from(widget.childrenAges);
-    while (_ages.length < _c) _ages.add(5);
-  }
-
-  Future<void> _showAgePicker(int idx) async {
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _ChildAgeDialog(
-        childNumber: idx + 1,
-        initialAge: idx < _ages.length ? _ages[idx] : 5,
-        onConfirm: (age) => setState(() {
-          if (idx < _ages.length)
-            _ages[idx] = age;
-          else
-            _ages.add(age);
-        }),
-      ),
-    );
-  }
-
-  void _incChildren() async {
-    setState(() {
-      _c++;
-      _ages.add(5);
-    });
-    await _showAgePicker(_c - 1);
-  }
-
-  void _decChildren() {
-    if (_c > 0)
-      setState(() {
-        _c--;
-        if (_ages.length > _c) _ages.removeAt(_c);
-      });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24.r)),
-      ),
-      padding: EdgeInsets.fromLTRB(22.w, 12.h, 22.w, 36.h),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 40.w,
-            height: 4.h,
-            decoration: BoxDecoration(
-              color: const Color(0xFFE2E8F0),
-              borderRadius: BorderRadius.circular(2.r),
-            ),
-          ),
-          SizedBox(height: 18.h),
-          Text(
-            'Select Guests',
-            style: TextStyle(
-              fontSize: 17.sp,
-              fontWeight: FontWeight.w800,
-              color: const Color(0xFF1A1D2E),
-            ),
-          ),
-          SizedBox(height: 6.h),
-          Text(
-            'Choose number of guests for your stay',
-            style: TextStyle(fontSize: 12.sp, color: const Color(0xFF94A3B8)),
-          ),
-          SizedBox(height: 24.h),
-          _row(
-            Icons.person_rounded,
-            const Color(0xFFEFF6FF),
-            const Color(0xFF1A4B8E),
-            'Adults',
-            'Age 13+',
-            _a,
-            _a > 1 ? () => setState(() => _a--) : null,
-            _a < 8 ? () => setState(() => _a++) : null,
-          ),
-          Container(
-            height: 1,
-            color: const Color(0xFFF0F4F8),
-            margin: EdgeInsets.symmetric(vertical: 16.h),
-          ),
-          _row(
-            Icons.child_care_rounded,
-            const Color(0xFFFFF7ED),
-            const Color(0xFFF59E0B),
-            'Children',
-            'Ages 2–12',
-            _c,
-            _c > 0 ? _decChildren : null,
-            _c < 6 ? _incChildren : null,
-          ),
-          if (_c > 0) ...[
-            SizedBox(height: 14.h),
-            Container(
-              padding: EdgeInsets.all(12.w),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF7ED),
-                borderRadius: BorderRadius.circular(14.r),
-                border: Border.all(color: const Color(0xFFFED7AA)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.child_friendly_rounded,
-                        size: 14.sp,
-                        color: const Color(0xFFF59E0B),
-                      ),
-                      SizedBox(width: 6.w),
-                      Text(
-                        'Children Ages',
-                        style: TextStyle(
-                          fontSize: 12.sp,
-                          fontWeight: FontWeight.w700,
-                          color: const Color(0xFFB45309),
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        'Tap to edit',
-                        style: TextStyle(
-                          fontSize: 10.sp,
-                          color: const Color(0xFF94A3B8),
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 10.h),
-                  Wrap(
-                    spacing: 8.w,
-                    runSpacing: 6.h,
-                    children: List.generate(_c, (i) {
-                      final age = i < _ages.length ? _ages[i] : 5;
-                      return GestureDetector(
-                        onTap: () => _showAgePicker(i),
-                        child: Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 12.w,
-                            vertical: 6.h,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(20.r),
-                            border: Border.all(color: const Color(0xFFF59E0B)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'Child ${i + 1}',
-                                style: TextStyle(
-                                  fontSize: 11.sp,
-                                  color: const Color(0xFF6B7280),
-                                ),
-                              ),
-                              SizedBox(width: 4.w),
-                              Text(
-                                '·',
-                                style: TextStyle(
-                                  fontSize: 11.sp,
-                                  color: const Color(0xFF94A3B8),
-                                ),
-                              ),
-                              SizedBox(width: 4.w),
-                              Text(
-                                '$age yrs',
-                                style: TextStyle(
-                                  fontSize: 11.sp,
-                                  fontWeight: FontWeight.w700,
-                                  color: const Color(0xFFB45309),
-                                ),
-                              ),
-                              SizedBox(width: 4.w),
-                              Icon(
-                                Icons.edit_rounded,
-                                size: 10.sp,
-                                color: const Color(0xFFF59E0B),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          SizedBox(height: 24.h),
-          SizedBox(
-            width: double.infinity,
-            height: 50.h,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1A4B8E),
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14.r),
-                ),
-              ),
-              onPressed: () {
-                widget.onDone(_a, _c, List.from(_ages.take(_c)));
-                Navigator.pop(context);
-              },
-              child: Text(
-                'Confirm · $_a Adult${_a > 1 ? 's' : ''}${_c > 0 ? ', $_c Child${_c > 1 ? 'ren' : ''}' : ''}',
-                style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w700),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _row(
-    IconData icon,
-    Color bg,
-    Color ic,
-    String title,
-    String sub,
-    int count,
-    VoidCallback? dec,
-    VoidCallback? inc,
-  ) {
-    return Row(
-      children: [
-        Container(
-          width: 46.w,
-          height: 46.h,
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(13.r),
-          ),
-          child: Icon(icon, size: 22.sp, color: ic),
-        ),
-        SizedBox(width: 14.w),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 14.sp,
-                fontWeight: FontWeight.w700,
-                color: const Color(0xFF1A1D2E),
-              ),
-            ),
-            Text(
-              sub,
-              style: TextStyle(fontSize: 11.sp, color: const Color(0xFF94A3B8)),
-            ),
-          ],
-        ),
-        const Spacer(),
-        _btn(Icons.remove_rounded, dec),
-        SizedBox(width: 16.w),
-        Text(
-          '$count',
-          style: TextStyle(
-            fontSize: 19.sp,
-            fontWeight: FontWeight.w800,
-            color: const Color(0xFF1A1D2E),
-          ),
-        ),
-        SizedBox(width: 16.w),
-        _btn(Icons.add_rounded, inc),
-      ],
-    );
-  }
-
-  Widget _btn(IconData icon, VoidCallback? fn) => GestureDetector(
-    onTap: fn,
-    child: Container(
-      width: 36.w,
-      height: 36.h,
-      decoration: BoxDecoration(
-        color: fn != null ? const Color(0xFF1A4B8E) : const Color(0xFFF1F5F9),
-        borderRadius: BorderRadius.circular(10.r),
-      ),
-      child: Icon(
-        icon,
-        size: 16.sp,
-        color: fn != null ? Colors.white : const Color(0xFFCBD5E1),
-      ),
-    ),
-  );
-}
-
-class _ChildAgeDialog extends StatefulWidget {
-  final int childNumber, initialAge;
-  final void Function(int) onConfirm;
-  const _ChildAgeDialog({
-    required this.childNumber,
-    required this.initialAge,
-    required this.onConfirm,
-  });
-  @override
-  State<_ChildAgeDialog> createState() => _ChildAgeDialogState();
-}
-
-class _ChildAgeDialogState extends State<_ChildAgeDialog> {
-  late int _age;
-  @override
-  void initState() {
-    super.initState();
-    _age = widget.initialAge;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: EdgeInsets.symmetric(horizontal: 28.w),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24.r),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.15),
-              blurRadius: 30,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
-        padding: EdgeInsets.all(24.w),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 56.w,
-              height: 56.h,
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF7ED),
-                borderRadius: BorderRadius.circular(16.r),
-              ),
-              child: Icon(
-                Icons.child_care_rounded,
-                size: 28.sp,
-                color: const Color(0xFFF59E0B),
-              ),
-            ),
-            SizedBox(height: 14.h),
-            Text(
-              'Child ${widget.childNumber} Age',
-              style: TextStyle(
-                fontSize: 17.sp,
-                fontWeight: FontWeight.w800,
-                color: const Color(0xFF1A1D2E),
-              ),
-            ),
-            SizedBox(height: 4.h),
-            Text(
-              'How old is this child?',
-              style: TextStyle(fontSize: 12.sp, color: const Color(0xFF94A3B8)),
-            ),
-            SizedBox(height: 20.h),
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.symmetric(vertical: 16.h),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF7ED),
-                borderRadius: BorderRadius.circular(16.r),
-                border: Border.all(color: const Color(0xFFFED7AA)),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    '$_age',
-                    style: TextStyle(
-                      fontSize: 42.sp,
-                      fontWeight: FontWeight.w800,
-                      color: const Color(0xFFF59E0B),
-                      height: 1,
-                    ),
-                  ),
-                  Text(
-                    'years old',
-                    style: TextStyle(
-                      fontSize: 12.sp,
-                      color: const Color(0xFF94A3B8),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(height: 16.h),
-            SizedBox(
-              height: 44.h,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: 13,
-                separatorBuilder: (_, __) => SizedBox(width: 8.w),
-                itemBuilder: (_, age) {
-                  final sel = age == _age;
-                  return GestureDetector(
-                    onTap: () => setState(() => _age = age),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      width: 40.w,
-                      height: 40.h,
-                      decoration: BoxDecoration(
-                        color: sel
-                            ? const Color(0xFFF59E0B)
-                            : const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(12.r),
-                        border: Border.all(
-                          color: sel
-                              ? const Color(0xFFF59E0B)
-                              : const Color(0xFFE2E8F0),
-                        ),
-                        boxShadow: sel
-                            ? [
-                                BoxShadow(
-                                  color: const Color(
-                                    0xFFF59E0B,
-                                  ).withOpacity(0.3),
-                                  blurRadius: 8,
-                                ),
-                              ]
-                            : [],
-                      ),
-                      child: Center(
-                        child: Text(
-                          '$age',
-                          style: TextStyle(
-                            fontSize: 14.sp,
-                            fontWeight: FontWeight.w700,
-                            color: sel ? Colors.white : const Color(0xFF6B7280),
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            SizedBox(height: 20.h),
-            SizedBox(
-              width: double.infinity,
-              height: 48.h,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1A4B8E),
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14.r),
-                  ),
-                ),
-                onPressed: () {
-                  widget.onConfirm(_age);
-                  Navigator.pop(context);
-                },
-                child: Text(
-                  'Confirm Age $_age',
-                  style: TextStyle(
-                    fontSize: 14.sp,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

@@ -2,7 +2,10 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/auth/portal_session.dart';
+import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/dio_client.dart';
+import '../../data/portal_hotel_json.dart';
 import '../../domain/entities/hotel_entity.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -257,29 +260,24 @@ class HotelListingBloc extends Bloc<HotelListingEvent, HotelListingState> {
     for (final city in citiesToTry) {
       try {
         final resp = await DioClient.instance.dio.post(
-          '/search/',
+          ApiConstants.searchEndpoint,
           data: {
-            'city_name': city,
+            'location': city,
             'check_in': _dateStr(DateTime.now().add(const Duration(days: 1))),
             'check_out': _dateStr(DateTime.now().add(const Duration(days: 2))),
             'adults': 2,
             'children': 0,
+            'rooms': 1,
           },
         );
 
         final data = resp.data;
         List<dynamic> raw = [];
         if (data is Map<String, dynamic>) {
+          await PortalSession.ingestFromApiJson(data);
           raw = (data['results'] ?? []) as List<dynamic>;
         } else if (data is List) {
           raw = data;
-        }
-
-        const base = 'https://portal.stayresto.com';
-        String resolveImg(dynamic v) {
-          if (v == null || v.toString().trim().isEmpty) return '';
-          final s = v.toString().trim();
-          return s.startsWith('http') ? s : '$base$s';
         }
 
         for (final e in raw) {
@@ -288,28 +286,9 @@ class HotelListingBloc extends Bloc<HotelListingEvent, HotelListingState> {
           if (_seenIds.contains(id)) continue;
           _seenIds.add(id);
 
-          String img = '';
-          final images = m['images'];
-          if (images is Map) {
-            img = resolveImg(images['front'] ?? images['primary'] ?? '');
-          } else {
-            img = resolveImg(m['front_image'] ?? m['primary_image'] ?? '');
-          }
-
-          final hotel = HotelEntity(
-            id: id,
-            name: (m['name'] ?? 'Hotel').toString(),
-            rating: double.tryParse(m['rating']?.toString() ?? '0') ?? 0.0,
-            city: (m['city'] ?? city).toString(),
-            address: (m['address'] ?? m['city'] ?? city).toString(),
-            bestPricePerNight:
-                double.tryParse(m['best_price_per_night']?.toString() ?? '0') ??
-                0.0,
-            frontImageUrl: img,
-            availableRoomsCount:
-                int.tryParse(m['available_rooms_count']?.toString() ?? '0') ??
-                0,
-            availableRooms: const [],
+          final hotel = PortalHotelJson.toHotelEntity(
+            m,
+            fallbackLocation: city,
           );
           result.add(hotel);
           _allHotels.add(hotel);

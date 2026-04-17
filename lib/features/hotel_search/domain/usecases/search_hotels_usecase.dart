@@ -11,56 +11,44 @@ class SearchHotelsUseCase {
 
   Future<Either<Failure, List<HotelEntity>>> call(SearchParams params) {
     return repository.searchHotels(
-      cityName: params.cityName,
-      hotelName: params.hotelName,
+      location: params.location,
       checkIn: params.checkIn,
       checkOut: params.checkOut,
       adults: params.adults,
       children: params.children,
       rooms: params.rooms,
-      starRating: params.starRating,
-      minPrice: params.minPrice,
-      maxPrice: params.maxPrice,
+      childAges: params.childAges,
     );
   }
 }
 
 class SearchParams extends Equatable {
-  final String cityName;
-  final String? hotelName;
+  final String location;
   final String checkIn;
   final String checkOut;
   final int adults;
   final int children;
   final int rooms;
-  final int? starRating;
-  final double? minPrice;
-  final double? maxPrice;
+  final List<int>? childAges;
 
   const SearchParams({
-    required this.cityName,
-    this.hotelName,
+    required this.location,
     required this.checkIn,
     required this.checkOut,
     required this.adults,
     this.children = 0,
     this.rooms = 1,
-    this.starRating,
-    this.minPrice,
-    this.maxPrice,
+    this.childAges,
   });
 
   @override
   List<Object?> get props => [
-    cityName,
-    hotelName,
+    location,
     checkIn,
     checkOut,
     adults,
     children,
     rooms,
-    starRating,
-    minPrice,
-    maxPrice,
+    childAges,
   ];
 }

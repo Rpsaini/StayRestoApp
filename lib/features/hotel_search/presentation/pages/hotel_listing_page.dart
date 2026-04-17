@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../domain/entities/hotel_entity.dart';
+import '../widgets/image_preview_actions.dart';
 import 'hotel_room_page.dart';
 // import '../../features/hotel_search/domain/entities/hotel_entity.dart';
 // import '../../Screen/home_search_screen/sub_pages/hotel_room_page.dart';
@@ -114,44 +115,52 @@ class _HotelCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasImg =
-        hotel.frontImageUrl.isNotEmpty &&
-        hotel.frontImageUrl.startsWith('http');
+    final heroUrl = hotel.resolvedHotelGalleryUrls.isNotEmpty
+        ? hotel.resolvedHotelGalleryUrls.first
+        : hotel.frontImageUrl;
+    final hasImg = heroUrl.isNotEmpty &&
+        (heroUrl.startsWith('http://') || heroUrl.startsWith('https://'));
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(18.r),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF1A4B8E).withOpacity(0.08),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(18.r),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18.r),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF1A4B8E).withOpacity(0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18.r),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GestureDetector(
+              onTap: () => openHotelImagePreview(context, hotel),
+              child: SizedBox(
                 height: 140.h,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
                     hasImg
                         ? Image.network(
-                            hotel.frontImageUrl,
+                            heroUrl,
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => _ph(),
                             loadingBuilder: (_, child, prog) =>
                                 prog == null ? child : _ph(),
                           )
-                        : _ph(),
+                        : (heroUrl.isNotEmpty
+                            ? Image.asset(
+                                heroUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => _ph(),
+                              )
+                            : _ph()),
                     Positioned.fill(
                       child: DecoratedBox(
                         decoration: BoxDecoration(
@@ -235,8 +244,12 @@ class _HotelCard extends StatelessWidget {
                   ],
                 ),
               ),
+            ),
 
-              Padding(
+            GestureDetector(
+              onTap: onTap,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
                 padding: EdgeInsets.fromLTRB(9.w, 7.h, 9.w, 8.h),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -302,8 +315,8 @@ class _HotelCard extends StatelessWidget {
                   ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

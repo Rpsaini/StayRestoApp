@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:stayresto/core/auth/portal_auth_sync.dart';
+import 'package:stayresto/core/network/dio_client.dart';
 
 import 'firebase_auth_services.dart';
 
@@ -97,6 +99,9 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
     setState(() => _loading = false);
 
     if (result.success) {
+      if (_isLogin) {
+        await PortalAuthSync.syncFromFirebase(DioClient.instance.dio);
+      }
       if (!_isLogin) {
         _showSnack(result.message, isSuccess: true);
         Future.delayed(const Duration(seconds: 2), _toggle);

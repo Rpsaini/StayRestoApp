@@ -4,19 +4,14 @@ import '../../../../core/errors/failures.dart';
 import '../entities/hotel_entity.dart';
 
 abstract class HotelRepository {
+  /// Search uses the same JSON body as BookingEngine → `SEARCH_API_URL` (POST).
   Future<Either<Failure, List<HotelEntity>>> searchHotels({
-    required String cityName,
-    String? hotelName,
-    String? address,
-    String? locationName,
+    required String location,
     required String checkIn,
     required String checkOut,
     required int adults,
     int children = 0,
     int rooms = 1,
-    String propertyType = 'hotel',
-    int? starRating,
-    double? minPrice,
-    double? maxPrice,
+    List<int>? childAges,
   });
 }

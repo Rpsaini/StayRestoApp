@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../features/hotel_search/presentation/bloc/Booking bloc.dart';
+import '../features/hotel_search/presentation/widgets/image_preview_actions.dart';
 
 class BookingsPage extends StatelessWidget {
   const BookingsPage({super.key});
@@ -247,9 +248,11 @@ class _BookingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasImg =
-        record.hotel.frontImageUrl.isNotEmpty &&
-        record.hotel.frontImageUrl.startsWith('http');
+    final imageUrl = record.hotel.resolvedHotelGalleryUrls.isNotEmpty
+        ? record.hotel.resolvedHotelGalleryUrls.first.trim()
+        : record.hotel.frontImageUrl.trim();
+    final hasImg = imageUrl.isNotEmpty &&
+        (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'));
 
     return Container(
       decoration: BoxDecoration(
@@ -271,30 +274,39 @@ class _BookingCard extends StatelessWidget {
             child: SizedBox(
               height: 120.h,
               width: double.infinity,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  hasImg
-                      ? Image.network(
-                          record.hotel.frontImageUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _ph(),
-                        )
-                      : _ph(),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withOpacity(0.65),
-                        ],
-                        stops: const [0.3, 1.0],
+              child: GestureDetector(
+                onTap: () => openHotelImagePreview(context, record.hotel),
+                behavior: HitTestBehavior.opaque,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    hasImg
+                        ? Image.network(
+                            imageUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _ph(),
+                          )
+                        : (imageUrl.isNotEmpty
+                            ? Image.asset(
+                                imageUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => _ph(),
+                              )
+                            : _ph()),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withOpacity(0.65),
+                          ],
+                          stops: const [0.3, 1.0],
+                        ),
                       ),
                     ),
-                  ),
-                  Positioned(
+                    Positioned(
                     top: 10.h,
                     right: 10.w,
                     child: Container(
@@ -328,46 +340,47 @@ class _BookingCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                  ),
-                  Positioned(
-                    bottom: 10.h,
-                    left: 12.w,
-                    right: 12.w,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          record.hotel.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 15.sp,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                          ),
-                        ),
-                        SizedBox(height: 2.h),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.location_on_rounded,
-                              size: 10.sp,
-                              color: Colors.white70,
+                    ),
+                    Positioned(
+                      bottom: 10.h,
+                      left: 12.w,
+                      right: 12.w,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            record.hotel.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 15.sp,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
                             ),
-                            SizedBox(width: 2.w),
-                            Text(
-                              record.hotel.city,
-                              style: TextStyle(
-                                fontSize: 10.sp,
+                          ),
+                          SizedBox(height: 2.h),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.location_on_rounded,
+                                size: 10.sp,
                                 color: Colors.white70,
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                              SizedBox(width: 2.w),
+                              Text(
+                                record.hotel.city,
+                                style: TextStyle(
+                                  fontSize: 10.sp,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import '../auth/portal_session.dart';
 import '../constants/api_constants.dart';
 
 class DioClient {
@@ -19,6 +20,30 @@ class DioClient {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
+        },
+      ),
+    );
+
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          PortalSession.readAuthHeaders().then(
+            (h) {
+              final t = h.token;
+              if (t != null && t.isNotEmpty) {
+                options.headers['X-Session-Token'] = t;
+                options.headers['X-Session'] = t;
+                // Opaque portal session (not necessarily DRF Token auth).
+                options.headers['Authorization'] = 'Bearer $t';
+              }
+              final c = h.cookie;
+              if (c != null && c.isNotEmpty) {
+                options.headers['Cookie'] = c;
+              }
+              handler.next(options);
+            },
+            onError: (_, __) => handler.next(options),
+          );
         },
       ),
     );

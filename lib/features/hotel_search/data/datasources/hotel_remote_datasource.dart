@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
 
+import '../../../../core/auth/portal_session.dart';
+import '../../../../core/constants/api_constants.dart';
 import '../../../../core/errors/failures.dart';
 import '../models/hotel_model.dart';
 import '../models/search_response_model.dart';
@@ -17,23 +19,36 @@ class HotelRemoteDataSourceImpl implements HotelRemoteDataSource {
     Map<String, dynamic> requestBody,
   ) async {
     try {
-      final response = await dio.post(
-        'https://portal.stayresto.com/api/search/',
+      final response = await dio.post<Map<String, dynamic>>(
+        ApiConstants.searchEndpoint,
         data: requestBody,
         options: Options(
           followRedirects: true,
           maxRedirects: 5,
-          validateStatus: (status) => status != null && status < 400,
+          validateStatus: (status) =>
+              status != null && (status < 400 || status == 429),
         ),
       );
 
-      if (response.data == null || response.data is! Map<String, dynamic>) {
-        throw const ParseFailure('Invalid response format from server.');
+      final code = response.statusCode;
+      final data = response.data;
+
+      if (code == 429 && data is Map<String, dynamic>) {
+        final retry = data['retry_after'];
+        throw ServerFailure(
+          'Too many searches. Try again in ${retry ?? 'a few'} seconds.',
+        );
       }
 
-      final searchResponse = SearchResponseModel.fromJson(
-        response.data as Map<String, dynamic>,
-      );
+      if (code != 200 || data == null) {
+        throw ServerFailure(
+          'Search failed${code != null ? ' ($code)' : ''}.',
+        );
+      }
+
+      await PortalSession.ingestFromApiJson(data);
+
+      final searchResponse = SearchResponseModel.fromJson(data);
 
       if (!searchResponse.success) {
         throw const ServerFailure('Search request was not successful.');
@@ -63,6 +78,11 @@ class HotelRemoteDataSourceImpl implements HotelRemoteDataSource {
         );
       case DioExceptionType.badResponse:
         final statusCode = e.response?.statusCode;
+        if (statusCode == 429) {
+          return const ServerFailure(
+            'Too many searches. Please wait and try again.',
+          );
+        }
         if (statusCode == 422 || statusCode == 400) {
           return const ServerFailure('Invalid search parameters.');
         }

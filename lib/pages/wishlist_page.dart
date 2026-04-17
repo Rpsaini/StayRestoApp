@@ -5,6 +5,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../features/hotel_search/domain/entities/hotel_entity.dart';
 import '../features/hotel_search/presentation/pages/Wishlist_bloc.dart';
 import '../features/hotel_search/presentation/pages/hotel_room_page.dart';
+import '../features/hotel_search/presentation/widgets/image_preview_actions.dart';
 
 class WishlistPage extends StatelessWidget {
   const WishlistPage({super.key});
@@ -271,33 +272,35 @@ class _WishlistCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageUrl = hotel.frontImageUrl.trim();
+    final imageUrl = hotel.resolvedHotelGalleryUrls.isNotEmpty
+        ? hotel.resolvedHotelGalleryUrls.first.trim()
+        : hotel.frontImageUrl.trim();
     final hasImg =
         imageUrl.isNotEmpty &&
         (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'));
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20.r),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF1A4B8E).withOpacity(0.08),
-              blurRadius: 20,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20.r),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Stack(
-                children: [
-                  AspectRatio(
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20.r),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF1A4B8E).withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20.r),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Stack(
+              children: [
+                GestureDetector(
+                  onTap: () => openHotelImagePreview(context, hotel),
+                  child: AspectRatio(
                     aspectRatio: 16 / 8,
                     child: hasImg
                         ? Image.network(
@@ -307,9 +310,16 @@ class _WishlistCard extends StatelessWidget {
                             loadingBuilder: (_, child, prog) =>
                                 prog == null ? child : _shimmer(),
                           )
-                        : _ph(),
+                        : (imageUrl.isNotEmpty
+                            ? Image.asset(
+                                imageUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => _ph(),
+                              )
+                            : _ph()),
                   ),
-                  Positioned.fill(
+                ),
+                Positioned.fill(
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -324,7 +334,7 @@ class _WishlistCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Positioned(
+                Positioned(
                     bottom: 10.h,
                     left: 12.w,
                     child: Row(
@@ -353,7 +363,7 @@ class _WishlistCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Positioned(
+                Positioned(
                     bottom: 10.h,
                     right: 52.w,
                     child: Container(
@@ -386,7 +396,7 @@ class _WishlistCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Positioned(
+                Positioned(
                     top: 10.h,
                     right: 10.w,
                     child: GestureDetector(
@@ -415,22 +425,25 @@ class _WishlistCard extends StatelessWidget {
                   ),
                 ],
               ),
-              Padding(
-                padding: EdgeInsets.fromLTRB(14.w, 12.h, 14.w, 14.h),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      hotel.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 15.sp,
-                        fontWeight: FontWeight.w700,
-                        color: const Color(0xFF1A1D2E),
-                        letterSpacing: -0.3,
+              GestureDetector(
+                onTap: onTap,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(14.w, 12.h, 14.w, 14.h),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        hotel.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15.sp,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF1A1D2E),
+                          letterSpacing: -0.3,
+                        ),
                       ),
-                    ),
                     SizedBox(height: 5.h),
                     Row(
                       children: [
@@ -491,10 +504,10 @@ class _WishlistCard extends StatelessWidget {
                   ],
                 ),
               ),
+            ),
             ],
           ),
         ),
-      ),
     );
   }
 

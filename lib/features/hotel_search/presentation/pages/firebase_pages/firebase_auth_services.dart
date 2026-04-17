@@ -1,5 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../../../../core/auth/portal_session.dart';
+
 class AuthService {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -88,6 +90,7 @@ class AuthService {
   }
 
   static Future<void> signOut() async {
+    await PortalSession.clearAll();
     await _auth.signOut();
   }
 

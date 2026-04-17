@@ -11,37 +11,27 @@ class HotelRepositoryImpl implements HotelRepository {
 
   @override
   Future<Either<Failure, List<HotelEntity>>> searchHotels({
-    required String cityName,
-    String? hotelName,
-    String? address,
-    String? locationName,
+    required String location,
     required String checkIn,
     required String checkOut,
     required int adults,
     int children = 0,
     int rooms = 1,
-    String propertyType = 'hotel',
-    int? starRating,
-    double? minPrice,
-    double? maxPrice,
+    List<int>? childAges,
   }) async {
     try {
       final body = <String, dynamic>{
-        'city_name': cityName,
+        'location': location,
         'check_in': checkIn,
         'check_out': checkOut,
         'adults': adults,
         'children': children,
         'rooms': rooms,
-        'property_type': propertyType,
-        if (hotelName != null && hotelName.isNotEmpty) 'hotel_name': hotelName,
-        if (address != null && address.isNotEmpty) 'address': address,
-        if (locationName != null && locationName.isNotEmpty)
-          'location_name': locationName,
-        if (starRating != null) 'star_rating': starRating,
-        if (minPrice != null) 'min_price': minPrice,
-        if (maxPrice != null) 'max_price': maxPrice,
       };
+      if (childAges != null && childAges.isNotEmpty) {
+        body['child_ages'] = childAges;
+        body['child_age'] = childAges.length == 1 ? childAges.first : childAges;
+      }
 
       final hotels = await remoteDataSource.searchHotels(body);
 

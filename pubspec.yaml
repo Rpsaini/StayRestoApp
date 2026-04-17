@@ -19,7 +19,8 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.10.4
+  # Use a lower bound that matches Flutter 3.27.x (ships with Dart 3.6.x).
+  sdk: '>=3.6.0 <4.0.0'
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -44,6 +45,9 @@ dependencies:
   shared_preferences: ^2.5.4
   firebase_core: ^4.6.0
   firebase_auth: ^6.3.0
+  # Keep compatible with Dart ≤3.9: do not let pub pull url_launcher_ios 6.4.x
+  # (those packages use language version 3.10).
+  url_launcher: 6.3.2
 
 dev_dependencies:
   flutter_test:
@@ -55,6 +59,9 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+
+dependency_overrides:
+  url_launcher_ios: 6.3.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

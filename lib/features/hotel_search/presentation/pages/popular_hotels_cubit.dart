@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/auth/portal_session.dart';
+import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/dio_client.dart';
+import '../../data/portal_hotel_json.dart';
 import '../../domain/entities/hotel_entity.dart';
 
 abstract class PopularHotelsState {}
@@ -20,107 +23,61 @@ class PopularHotelsLoaded extends PopularHotelsState {
 class PopularHotelsCubit extends Cubit<PopularHotelsState> {
   PopularHotelsCubit() : super(PopularHotelsInitial());
 
-  static const _cities = [
-    'Mumbai',
-    'Delhi',
-    'Goa',
-    'Jaipur',
-    'Bangalore',
-    'Shimla',
-    'Kerala',
-    'Manali',
-    'Agra',
-    'Hyderabad',
-  ];
-
-  static const int _maxTotal = 10000;
+  /// Same as BookingEngine `_fetch_top_search_hotels` cap.
+  static const int _maxHotels = 24;
 
   Future<void> fetch() async {
     emit(PopularHotelsLoading());
-    final allHotels = <HotelEntity>[];
-    final seen = <int>{};
+    try {
+      final resp = await DioClient.instance.dio.post<Map<String, dynamic>>(
+        ApiConstants.topSearchHotelsEndpoint,
+        data: <String, dynamic>{},
+      );
 
-    for (final city in _cities) {
-      try {
-        final resp = await DioClient.instance.dio.post(
-          '/search/',
-          data: {
-            'city_name': city,
-            'check_in': _dt(DateTime.now().add(const Duration(days: 1))),
-            'check_out': _dt(DateTime.now().add(const Duration(days: 2))),
-            'adults': 2,
-            'children': 0,
-          },
-        );
-
-        final data = resp.data;
-        List<dynamic> raw = [];
-        if (data is Map<String, dynamic>) {
-          raw = (data['results'] ?? []) as List<dynamic>;
-        } else if (data is List) {
-          raw = data;
-        }
-
-        debugPrint('PopularHotels $city → ${raw.length} results');
-
-        const base = 'https://portal.stayresto.com';
-        String resolveImg(dynamic v) {
-          if (v == null || v.toString().trim().isEmpty) return '';
-          final s = v.toString().trim();
-          return s.startsWith('http') ? s : '$base$s';
-        }
-
-        for (final e in raw) {
-          final m = Map<String, dynamic>.from(e as Map);
-          final id = int.tryParse(m['id']?.toString() ?? '0') ?? 0;
-
-          if (seen.contains(id)) continue;
-          seen.add(id);
-
-          String hotelImg = '';
-          final images = m['images'];
-          if (images is Map) {
-            hotelImg = resolveImg(images['front'] ?? images['primary'] ?? '');
-          } else {
-            hotelImg = resolveImg(m['front_image'] ?? m['primary_image'] ?? '');
-          }
-
-          allHotels.add(
-            HotelEntity(
-              id: id,
-              name: (m['name'] ?? 'Hotel').toString(),
-              rating: double.tryParse(m['rating']?.toString() ?? '0') ?? 0.0,
-              city: (m['city'] ?? city).toString(),
-              address: (m['address'] ?? m['city'] ?? city).toString(),
-              bestPricePerNight:
-                  double.tryParse(
-                    m['best_price_per_night']?.toString() ??
-                        m['price_per_night']?.toString() ??
-                        '0',
-                  ) ??
-                  0.0,
-              frontImageUrl: hotelImg,
-              availableRoomsCount:
-                  int.tryParse(m['available_rooms_count']?.toString() ?? '0') ??
-                  0,
-              availableRooms: const [],
-            ),
-          );
-        }
-      } catch (e) {
-        debugPrint('PopularHotels $city error: $e');
-        continue;
+      final data = resp.data;
+      if (data == null ||
+          data['success'] != true ||
+          data['locations'] is! List) {
+        emit(PopularHotelsError());
+        return;
       }
-    }
 
-    debugPrint('PopularHotels TOTAL: ${allHotels.length}');
-    if (allHotels.isEmpty) {
+      await PortalSession.ingestFromApiJson(data);
+
+      final locations = data['locations'] as List<dynamic>;
+      final allHotels = <HotelEntity>[];
+      final seen = <int>{};
+
+      outer:
+      for (final loc in locations) {
+        if (loc is! Map) continue;
+        final locMap = Map<String, dynamic>.from(loc);
+        final fallback =
+            (locMap['name'] ?? locMap['city'] ?? locMap['title'] ?? '')
+                .toString();
+        final hotelsRaw = locMap['hotels'] as List<dynamic>? ?? [];
+        for (final h in hotelsRaw) {
+          if (h is! Map) continue;
+          final m = Map<String, dynamic>.from(h);
+          final id = int.tryParse(m['id']?.toString() ?? '0') ?? 0;
+          if (id == 0 || seen.contains(id)) continue;
+          seen.add(id);
+          allHotels.add(
+            PortalHotelJson.toHotelEntity(m, fallbackLocation: fallback),
+          );
+          if (allHotels.length >= _maxHotels) break outer;
+        }
+      }
+
+      debugPrint('PopularHotels (top-search) TOTAL: ${allHotels.length}');
+      if (allHotels.isEmpty) {
+        emit(PopularHotelsError());
+      } else {
+        emit(PopularHotelsLoaded(allHotels));
+      }
+    } catch (e, st) {
+      debugPrint('PopularHotels error: $e $st');
       emit(PopularHotelsError());
-    } else {
-      emit(PopularHotelsLoaded(allHotels));
     }
   }
-
-  String _dt(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }
